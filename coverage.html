@@ -1,0 +1,1301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Interactive Word Cloud with Undo/Redo and JSON Display</title>
+  <script src="https://d3js.org/d3.v6.min.js"></script>
+  <style>
+    body { 
+      font-family: "JetBrains Mono",monospace;
+      text-align: center; 
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .main-content {
+      display: flex;
+      flex-grow: 1;
+    }
+
+    .left-controls {
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      background-color: #fafafa;
+      width: 200px;
+    }
+   
+    svg {
+      flex-grow: 1;
+      border: 1px solid #ccc;
+      width: 100%;
+      height: 80vh;
+    }
+
+    .word { 
+      cursor: grab; 
+      user-select: none; 
+    }
+
+    .selected { 
+      stroke: red; 
+      stroke-width: 2px; 
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      padding: 10px;
+      background-color: #f0f0f0;
+      border-bottom: 1px solid #ccc;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    .flex-grow {
+      flex-grow: 1; 
+      text-align: center;
+    }
+
+    .center-point { 
+      fill: #f97c28;  
+      cursor: grab; 
+    }
+
+    .brush .selection { 
+      fill: rgba(0, 0, 255, 0.1); 
+      stroke: blue; 
+    }
+
+    .handle {
+      fill: orange;
+      stroke: black;
+      stroke-width: 1px;
+      cursor: pointer;
+    }
+
+    button, select {
+        align-items: center;
+        appearance: none;
+        background-color: #FCFCFD;
+        border-radius: 4px;
+        border-width: 0;
+        box-shadow: rgba(45, 35, 66, 0.4) 0 2px 4px,rgba(45, 35, 66, 0.3) 0 7px 13px -3px,#D6D6E7 0 -3px 0 inset;
+        box-sizing: border-box;
+        color: #36395A;
+        cursor: pointer;
+        display: inline-flex;
+        font-family: "JetBrains Mono",monospace;
+        height: 48px;
+        justify-content: center;
+        line-height: 1;
+        list-style: none;
+        overflow: hidden;
+        padding-left: 16px;
+        padding-right: 16px;
+        position: relative;
+        text-align: left;
+        text-decoration: none;
+        transition: box-shadow .15s,transform .15s;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+        white-space: nowrap;
+        will-change: box-shadow,transform;
+        font-size: 18px;
+    }
+
+    input {
+        align-items: center;
+        appearance: none;
+        background-color: #FCFCFD;
+        border-radius: 4px;
+        border-width: 2;
+        /* box-shadow: rgba(45, 35, 66, 0.4) 0 2px 4px,rgba(45, 35, 66, 0.3) 0 7px 13px -3px,#D6D6E7 0 -3px 0 inset; */
+        box-sizing: border-box;
+        color: #36395A;
+        cursor: pointer;
+        display: inline-flex;
+        font-family: "JetBrains Mono",monospace;
+        height: 48px;
+        justify-content: center;
+        line-height: 1;
+        list-style: none;
+        overflow: hidden;
+        padding-left: 16px;
+        padding-right: 16px;
+        position: relative;
+        text-align: left;
+        text-decoration: none;
+        transition: box-shadow .15s,transform .15s;
+        user-select: none;
+        -webkit-user-select: none;
+        touch-action: manipulation;
+        white-space: nowrap;
+        will-change: box-shadow,transform;
+        font-size: 18px;
+    }
+
+    button:focus {
+    box-shadow: #D6D6E7 0 0 0 1.5px inset, rgba(45, 35, 66, 0.4) 0 2px 4px, rgba(45, 35, 66, 0.3) 0 7px 13px -3px, #D6D6E7 0 -3px 0 inset;
+    }
+
+    button:hover {
+    box-shadow: rgba(45, 35, 66, 0.4) 0 4px 8px, rgba(45, 35, 66, 0.3) 0 7px 13px -3px, #D6D6E7 0 -3px 0 inset;
+    transform: translateY(-2px);
+    }
+
+    button:active {
+    box-shadow: #D6D6E7 0 3px 7px inset;
+    transform: translateY(2px);
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Controls at the top -->
+    <div class="controls">
+      <img src="COVERAGE-logo_horizontal_crop.png" alt="logo" width="100" height="60" style="padding: 0px 53px 0px 53px;"> 
+      <div class="button-group">
+          <button onclick="startBrushLasso()">select</button>
+          <button id="drawLineButton" onclick="toggleLineDrawing()">line</button>
+      </div>
+      
+      <div class="button-group flex-grow">
+          <button id="undoButton" onclick="undo()">undo 0</button>
+          <button id="redoButton" onclick="redo()">redo 0</button>
+      </div>
+
+      <div class="button-group">
+          <button onclick="generateJSON()">JSON:out</button>
+          <button onclick="displayJSON()">JSON:in</button>
+      </div>
+    </div>
+
+    <!-- Flex container for left controls and canvas -->
+    <div class="main-content">
+      <div class="left-controls">
+        <input type="text" id="wordInput" placeholder="word : input" style="margin: 3px">
+        <select id="fontSizeInput" style="margin: 3px">
+          <!-- <option value="" disabled selected>▽ size</option> -->
+          <option value="big" selected>size : big</option>
+          <option value="medium" >size : medium</option>
+          <option value="small">size : small</option>
+        </select>
+        <select id="colorInput" style="margin: 3px">
+          <!-- <option value="" disabled selected>▽ color</option> -->
+          <option value="#000000" selected>color : black</option>
+          <option value="#e61e07">color : red</option>
+          <option value="#42b131">color : green</option>
+          <option value="#fccf00">color : yellow</option>
+          <option value="#009cd9">color : blue</option>
+          <!-- <option value="#f97c28">color : orange</option> -->
+        </select>
+        <!-- <button onclick="(selectedWords && selectedWords.length > 0) ? updateWord() : addWord()" style="margin: 3px">enter ↵</button> -->
+        <!-- <button onclick="addWord()" style="margin: 3px">add</button>
+        <button onclick="updateWord()" style="margin: 3px">update</button> -->
+        <!-- Key-value -pair 1 -->
+        <input type="text" id="keyInput" placeholder="key   :" style="margin: 3px">
+        <input type="text" id="valueInput" placeholder="      : value" style="margin: 3px">
+
+        <!-- Key-value -pair 2 -->
+        <input type="text" id="keyInput2" placeholder="key   :" style="margin: 3px">
+        <input type="text" id="valueInput2" placeholder="      : value" style="margin: 3px">
+
+        <!-- Key-value -pair 3 -->
+        <input type="text" id="keyInput3" placeholder="key   :" style="margin: 3px">
+        <input type="text" id="valueInput3" placeholder="      : value" style="margin: 3px">
+
+        <!-- Key-value -pair 4 -->
+        <input type="text" id="keyInput4" placeholder="key   :" style="margin: 3px">
+        <input type="text" id="valueInput4" placeholder="      : value" style="margin: 3px">
+        <!-- <button onclick="deleteWord()" style="margin: 3px">Delete</button> -->
+      </div>
+  <svg id="wordCloud"></svg>
+    </div>
+        <a href='https://www.free-counters.org/'>free HitCounters</a> <script type='text/javascript' src='https://www.freevisitorcounters.com/auth.php?id=2e8aad96e0f289e33e4530e71137a796f0405839'></script>
+        <script type="text/javascript" src="https://www.freevisitorcounters.com/en/home/counter/1297815/t/4"></script>
+    </div>
+  <script>
+    // =============================
+    // PAN, ZOOM & GLOBAL VARIABLES
+    // =============================
+    // Global array for selected elements (words or lines)
+    let selectedElementsArray = [];
+
+    // Clipboard for copy/paste-functionality
+    let clipboardWord = null;
+
+    const svg = d3.select("#wordCloud");
+    // Get actual SVG dimensions (using getBoundingClientRect) or use fallbacks.
+    const fallbackWidth = 800, fallbackHeight = 600;
+    const svgRect = svg.node().getBoundingClientRect();
+    const actualWidth = svgRect.width || fallbackWidth;
+    const actualHeight = svgRect.height || fallbackHeight;
+    
+    // Create a top-level group for all visual elements.
+    const linesGroup = svg.insert("g", ":first-child").attr("id", "linesGroup");
+    const zoomGroup = svg.append("g").attr("id", "zoomGroup");
+    const handlesGroup = svg.append("g").attr("id", "handlesGroup");
+    
+    // Enable D3 zoom behavior.
+    const zoom = d3.zoom()
+      .scaleExtent([0.5, 10])
+      .on("zoom", (event) => {
+        zoomGroup.attr("transform", event.transform);
+        linesGroup.attr("transform", event.transform);
+        handlesGroup.attr("transform", event.transform);
+      });
+    svg.call(zoom);
+    
+    const fontSizeMap = { small: "20px", medium: "30px", big: "50px" };
+    let words = [];            // Array of word data objects.
+    let selectedWords = [];    // Array of selected word elements.
+    let linesData = [];
+    
+    // -----------------------------
+    // UNDO / REDO STATE MANAGEMENT
+    // -----------------------------
+    let undoStack = [];
+    let redoStack = [];
+    const maxStackSize = 5;
+    
+    function getState() {
+      // Capture center point coordinates and a deep clone of the words array.
+      return {
+        centerPoint: {
+          x: parseFloat(centerPoint.attr("cx")),
+          y: parseFloat(centerPoint.attr("cy"))
+        },
+        words: JSON.parse(JSON.stringify(words)),
+        lines: JSON.parse(JSON.stringify(linesData))
+      };
+    }
+    
+    function applyState(state) {
+      // Clear the zoomGroup and re-render the state.
+      zoomGroup.selectAll("*").remove();
+      // Recreate the center point.
+      centerPoint = zoomGroup.append("circle")
+        .attr("cx", state.centerPoint.x)
+        .attr("cy", state.centerPoint.y)
+        .attr("r", 10)
+        .attr("class", "center-point")
+        .call(d3.drag()
+          .on("start", dragStart)
+          .on("drag", draggingCenter)
+          .on("end", dragEnd));
+    
+      // Create a group for words.
+      const wordsGroup = zoomGroup.append("g").attr("id", "words");
+      words = [];
+      state.words.forEach(wordData => {
+        const textElement = wordsGroup.append("text")
+          .attr("x", wordData.x)
+          .attr("y", wordData.y)
+          .attr("font-size", fontSizeMap[wordData.size])
+          .attr("fill", wordData.color || "#000")
+          .attr("data-size", wordData.size)
+          .attr("class", "word")
+          .text(wordData.word)
+          .on("click", function(event) {
+            event.stopPropagation();
+            selectWord(d3.select(this));
+          })
+          .call(d3.drag()
+            .on("start", dragStart)
+            .on("drag", dragging)
+            .on("end", dragEnd));
+        textElement.datum(wordData);
+        words.push(wordData);
+      });
+
+      // Re-render lines (each as a group with a transparent hit area and visible line).
+      linesGroup.selectAll("*").remove();
+      linesData = state.lines;
+      linesData.forEach(line => {
+         const lineGroup = linesGroup.append("g").attr("class", "line-group");
+         lineGroup.append("line")
+            .attr("x1", line.x1)
+            .attr("y1", line.y1)
+            .attr("x2", line.x2)
+            .attr("y2", line.y2)
+            .attr("stroke", "transparent")
+            .attr("stroke-width", (line.strokeWidth || 2) + 8)
+            .on("click", function(event) {
+               event.stopPropagation();
+               // Select the visible line
+               selectElement(d3.select(lineGroup.select("line.visible").node()));
+            });
+         lineGroup.append("line")
+            .attr("class", "visible")
+            .attr("x1", line.x1)
+            .attr("y1", line.y1)
+            .attr("x2", line.x2)
+            .attr("y2", line.y2)
+            .attr("stroke", line.stroke || "black")
+            .attr("stroke-width", line.strokeWidth || 2)
+            .on("click", function(event) {
+               event.stopPropagation();
+               selectElement(d3.select(this));
+            })
+            .datum(line);
+         line.type = "line";
+      });
+      
+      // Remove editing handles.
+      handlesGroup.selectAll("*").remove();
+    }
+
+    
+    function pushToUndo(state, clearRedo = false) {
+      if (clearRedo) { redoStack = []; }
+      // Deep clone the state.
+      const cloned = JSON.parse(JSON.stringify(state));
+      undoStack.push(cloned);
+      if (undoStack.length > maxStackSize) { undoStack.shift(); }
+      updateUndoRedoButtons();
+    }
+    
+    function pushToRedo(state) {
+      const cloned = JSON.parse(JSON.stringify(state));
+      redoStack.push(cloned);
+      if (redoStack.length > maxStackSize) { redoStack.shift(); }
+      updateUndoRedoButtons();
+    }
+    
+    function updateUndoRedoButtons() {
+      document.getElementById("undoButton").innerText = `Undo ${undoStack.length}`;
+      document.getElementById("redoButton").innerText = `Redo ${redoStack.length}`;
+    }
+    
+    function undo() {
+      if (undoStack.length === 0) return;
+      const currentState = getState();
+      pushToRedo(currentState);
+      const prevState = undoStack.pop();
+      applyState(prevState);
+      updateUndoRedoButtons();
+    }
+    
+    function redo() {
+      if (redoStack.length === 0) return;
+      const currentState = getState();
+      pushToUndo(currentState, false);
+      const nextState = redoStack.pop();
+      applyState(nextState);
+      updateUndoRedoButtons();
+    }
+    
+    // ----------------------------
+    // INTERACTION: BACKGROUND CLICK
+    // ----------------------------
+    // Global variable to hold the coordinates for the next word.
+    let nextWordPosition = null;
+
+    svg.on("click", function(event) {
+        // Clear any existing selection and input.
+
+        // If there is an active selected word, update it first.
+        if (selectedWords && selectedWords.length > 0) {
+            updateWord();
+        }
+
+        clearSelection();
+        clearSelectionEl();
+        document.getElementById("wordInput").value = "";
+
+        // Get the mouse coordinates relative to the SVG.
+        // (You might need to pass svg.node() as the second argument if your SVG is transformed.)
+        const [x, y] = d3.pointer(event);
+        
+        // Store the clicked coordinates.
+        nextWordPosition = { x, y };
+    });
+    
+    // ----------------------------
+    // CENTER POINT
+    // ----------------------------
+    let centerPoint = zoomGroup.append("circle")
+      .attr("cx", actualWidth / 2)
+      .attr("cy", actualHeight / 2)
+      .attr("r", 10)
+      .attr("class", "center-point")
+      .call(d3.drag()
+        .on("start", dragStart)
+        .on("drag", draggingCenter)
+        .on("end", dragEnd));
+    
+    // ----------------------------
+    // ADD, UPDATE, DELETE WORDS (and now LINES)
+    // ----------------------------
+
+    function addWord() {
+        const wordInput = document.getElementById("wordInput");
+        const wordText = wordInput.value.trim();
+        if (wordText === "") return;
+        
+        // Record state before change.
+        pushToUndo(getState(), true);
+        
+        const fontSizeKey = document.getElementById("fontSizeInput").value;
+        const fontSize = fontSizeMap[fontSizeKey];
+        const color = document.getElementById("colorInput").value;
+        
+        // Read key-value pair inputs.
+        const key1 = document.getElementById("keyInput").value.trim();
+        const value1 = document.getElementById("valueInput").value.trim();
+        const key2 = document.getElementById("keyInput2").value.trim();
+        const value2 = document.getElementById("valueInput2").value.trim();
+        const key3 = document.getElementById("keyInput3").value.trim();
+        const value3 = document.getElementById("valueInput3").value.trim();
+        const key4 = document.getElementById("keyInput4").value.trim();
+        const value4 = document.getElementById("valueInput4").value.trim();
+        
+        // Determine the word's position.
+        let x, y;
+        if (nextWordPosition) {
+            // Use the clicked position.
+            x = nextWordPosition.x;
+            y = nextWordPosition.y;
+            nextWordPosition = null;
+        } else {
+            // Fallback to a random position.
+            x = Math.random() * actualWidth;
+            y = Math.random() * actualHeight;
+        }
+        
+        const textElement = zoomGroup.append("text")
+            .attr("x", x)
+            .attr("y", y)
+            .attr("font-size", fontSize)
+            .attr("fill", color)
+            .attr("data-size", fontSizeKey)
+            .attr("class", "word")
+            .text(wordText)
+            .on("click", function(event) {
+                event.stopPropagation();
+                selectWord(d3.select(this));
+            })
+            .call(d3.drag()
+                .on("start", dragStart)
+                .on("drag", dragging)
+                .on("end", dragEnd));
+
+        // Create the word data object and include metadata.
+        const wordData = {
+            word: wordText,
+            size: fontSizeKey,
+            x: parseFloat(textElement.attr("x")),
+            y: parseFloat(textElement.attr("y")),
+            color: color,
+            font: textElement.attr("font-family") || textElement.style("font-family"),
+            links: {},
+            metadata: {}
+        };
+
+        // Add each metadata pair if both key and value are provided.
+        if (key1 !== "" && value1 !== "") {
+            wordData.metadata[key1] = value1;
+        }
+        if (key2 !== "" && value2 !== "") {
+            wordData.metadata[key2] = value2;
+        }
+        if (key3 !== "" && value3 !== "") {
+            wordData.metadata[key3] = value3;
+        }
+        if (key4 !== "" && value4 !== "") {
+            wordData.metadata[key4] = value4;
+        }
+        
+        textElement.datum(wordData);
+        words.push(wordData);
+
+        // Clear the inputs.
+        wordInput.value = "";
+        document.getElementById("keyInput").value = "";
+        document.getElementById("valueInput").value = "";
+        document.getElementById("keyInput2").value = "";
+        document.getElementById("valueInput2").value = "";
+        document.getElementById("keyInput3").value = "";
+        document.getElementById("valueInput3").value = "";
+        document.getElementById("keyInput4").value = "";
+        document.getElementById("valueInput4").value = "";
+        }
+
+    function updateWord() {
+      // If there are no selected words, simply return.
+      if (!selectedWords || selectedWords.length === 0) { 
+        return; 
+      }
+      
+      // Record state before change.
+      pushToUndo(getState(), true);
+      
+      // Get updated text, font size, and color.
+      const newText = document.getElementById("wordInput").value.trim();
+      const fontSizeKey = document.getElementById("fontSizeInput").value;
+      const fontSize = fontSizeMap[fontSizeKey];
+      const color = document.getElementById("colorInput").value;
+      
+      // If no valid word text is provided, just return.
+      if (newText === "") { 
+        return; 
+      }
+      
+      // Read key-value pair inputs.
+      const key1 = document.getElementById("keyInput").value.trim();
+      const value1 = document.getElementById("valueInput").value.trim();
+      const key2 = document.getElementById("keyInput2").value.trim();
+      const value2 = document.getElementById("valueInput2").value.trim();
+      const key3 = document.getElementById("keyInput3").value.trim();
+      const value3 = document.getElementById("valueInput3").value.trim();
+      const key4 = document.getElementById("keyInput4").value.trim();
+      const value4 = document.getElementById("valueInput4").value.trim();
+      
+      // Build a new metadata object based solely on the current input fields.
+      const newMetadata = {};
+      if (key1 !== "" && value1 !== "") {
+        newMetadata[key1] = value1;
+      }
+      if (key2 !== "" && value2 !== "") {
+        newMetadata[key2] = value2;
+      }
+      if (key3 !== "" && value3 !== "") {
+        newMetadata[key3] = value3;
+      }
+      if (key4 !== "" && value4 !== "") {
+        newMetadata[key4] = value4;
+      }
+      
+      // Update each selected word.
+      selectedWords.forEach(sel => {
+        // Update the visual appearance.
+        sel.text(newText)
+          .attr("font-size", fontSize)
+          .attr("fill", color)
+          .attr("data-size", fontSizeKey);
+        
+        // Update the data bound to the element.
+        let d = sel.datum();
+        d.word = newText;
+        d.size = fontSizeKey;
+        d.color = color;
+        
+        // Replace the metadata with the new metadata from the inputs.
+        // Using Object.assign ensures each word gets its own copy.
+        d.metadata = Object.assign({}, newMetadata);
+
+        // Clear the inputs.
+        wordInput.value = "";
+        document.getElementById("keyInput").value = "";
+        document.getElementById("valueInput").value = "";
+        document.getElementById("keyInput2").value = "";
+        document.getElementById("valueInput2").value = "";
+        document.getElementById("keyInput3").value = "";
+        document.getElementById("valueInput3").value = "";
+        document.getElementById("keyInput4").value = "";
+        document.getElementById("valueInput4").value = "";
+      });
+    }
+
+
+    // List of element IDs to attach the listener to.
+    const inputIds = [
+      "wordInput",
+      "fontSizeInput",
+      "colorInput",
+      "keyInput",
+      "valueInput",
+      "keyInput2",
+      "valueInput2",
+      "keyInput3",
+      "valueInput3",
+      "keyInput4",
+      "valueInput4"
+    ];
+
+    // Attach the event listener to each element.
+    inputIds.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.addEventListener("keydown", function(event) {
+          if (event.key === "Enter") {
+            event.preventDefault();  // Prevent default behavior (like opening the select menu)
+            // If there is an active selection, update; otherwise, add.
+            if (selectedWords && selectedWords.length > 0) {
+              updateWord();
+            } else {
+              addWord();
+            }
+          }
+        });
+      }
+    });
+
+    
+    // ----------------------------
+    // UPDATED DELETE FUNCTION
+    // Now deletes both selected words and selected lines.
+    // ----------------------------
+    function deleteWord() {
+      // Check if there is any selected word or line.
+      if (selectedWords.length === 0 && selectedElementsArray.length === 0) { 
+        alert("No word or line selected."); 
+        return; 
+      }
+      // Record state before change.
+      pushToUndo(getState(), true);
+      
+      // Delete selected words.
+      selectedWords.forEach(sel => {
+        let d = sel.datum();
+        sel.remove();
+        words = words.filter(wordObj => wordObj !== d);
+      });
+      
+      // Delete selected lines.
+      selectedElementsArray.forEach(sel => {
+        let d = sel.datum();
+        // Remove the entire line group (both the visible line and its hit area).
+        d3.select(sel.node().parentNode).remove();
+        // Remove the corresponding line data.
+        linesData = linesData.filter(lineObj => lineObj !== d);
+      });
+      
+      clearSelection();
+      clearSelectionEl();
+    }
+
+    // event listener for keyboard del/backspace input
+
+    d3.select(window).on("keydown", function (event) {
+      const activeTag = document.activeElement.tagName.toLowerCase();
+      if ((event.key === "Delete" || event.key === "Backspace") && activeTag !== "input" && activeTag !== "textarea") {
+        event.preventDefault();
+        deleteWord();
+        clearSelection();
+        document.getElementById("wordInput").value = "";
+      }
+    });
+    
+    // ----------------------------
+    // DRAGGING FUNCTIONS
+    // ----------------------------
+    // Global counter and variable to group drag events.
+    let activeDragCount = 0;
+    let dragInitialState = null;
+    
+    function dragStart(event, d) {
+      if (activeDragCount === 0) {
+        // Record the initial state before any dragging occurs.
+        dragInitialState = getState();
+      }
+      activeDragCount++;
+      d3.select(this).raise().attr("stroke", "black");
+    }
+
+    function dragging(event, d) {
+      if (selectedWords.some(sel => sel.node() === this)) {
+        selectedWords.forEach(sel => {
+          let data = sel.datum();
+          data.x += event.dx;
+          data.y += event.dy;
+          sel.attr("x", data.x).attr("y", data.y);
+        });
+      } else {
+        d3.select(this).attr("x", event.x).attr("y", event.y);
+        if (d) { d.x = event.x; d.y = event.y; }
+      }
+
+      // Update all selected lines.
+      selectedElementsArray.forEach(el => {
+        const d = el.datum();
+        d.x1 += event.dx;
+        d.y1 += event.dy;
+        d.x2 += event.dx;
+        d.y2 += event.dy;
+        el.attr("x1", d.x1)
+          .attr("y1", d.y1)
+          .attr("x2", d.x2)
+          .attr("y2", d.y2);
+
+        // Also update any associated handles if necessary.
+        // (Assume handle1 and handle2 are associated with this element.)
+      });
+    }
+    
+    function draggingCenter(event, d) {
+      d3.select(this).attr("cx", event.x).attr("cy", event.y);
+    }
+    
+    function dragEnd(event, d) {
+      d3.select(this).attr("stroke", null);
+      activeDragCount--;
+      // When all drags have finished, push the initial state onto the undo stack.
+      if (activeDragCount === 0 && dragInitialState !== null) {
+        pushToUndo(dragInitialState, true);
+        dragInitialState = null;
+      }
+    }
+    
+    // ----------------------------
+    // SELECTION FUNCTIONS
+    // ----------------------------
+
+    function selectWord(wordSelection) {
+        clearSelection();
+        selectedWords.push(wordSelection);
+        wordSelection.classed("selected", true);
+        
+        const wordData = wordSelection.datum();
+        document.getElementById("wordInput").value = wordData.word;
+        document.getElementById("fontSizeInput").value = wordData.size;
+        document.getElementById("colorInput").value = wordData.color;
+        
+        // Clear all key/value inputs first.
+        document.getElementById("keyInput").value = "";
+        document.getElementById("valueInput").value = "";
+        document.getElementById("keyInput2").value = "";
+        document.getElementById("valueInput2").value = "";
+        document.getElementById("keyInput3").value = "";
+        document.getElementById("valueInput3").value = "";
+        document.getElementById("keyInput4").value = "";
+        document.getElementById("valueInput4").value = "";
+        
+        // Populate the key/value inputs.
+        const metadata = wordData.metadata || {};
+        const keys = Object.keys(metadata);
+        
+        // Depending on how you want to order these,
+        // you might simply fill in the first three keys.
+        if (keys.length > 0) {
+            document.getElementById("keyInput").value = keys[0];
+            document.getElementById("valueInput").value = metadata[keys[0]];
+        }
+        if (keys.length > 1) {
+            document.getElementById("keyInput2").value = keys[1];
+            document.getElementById("valueInput2").value = metadata[keys[1]];
+        }
+        if (keys.length > 2) {
+            document.getElementById("keyInput3").value = keys[2];
+            document.getElementById("valueInput3").value = metadata[keys[2]];
+        }
+        if (keys.length > 3) {
+            document.getElementById("keyInput4").value = keys[3];
+            document.getElementById("valueInput4").value = metadata[keys[3]];
+        }
+    }
+
+    function selectElement(el) {
+      // clearSelection();
+      selectedElementsArray.push(el);
+      el.classed("selected", true);
+      const d = el.datum();
+      hideLineHandles();
+      showLineHandles(el);
+    }
+    
+    function clearSelection() {
+      selectedWords.forEach(sel => sel.classed("selected", false));
+      selectedWords = [];
+      // Clear the key/value input fields
+      document.getElementById("keyInput").value = "";
+      document.getElementById("valueInput").value = "";
+      document.getElementById("keyInput2").value = "";
+      document.getElementById("valueInput2").value = "";
+      document.getElementById("keyInput3").value = "";
+      document.getElementById("valueInput3").value = "";
+      document.getElementById("keyInput4").value = "";
+      document.getElementById("valueInput4").value = "";
+    }
+
+    function clearSelectionEl() {
+      selectedElementsArray.forEach(el => el.classed("selected", false));
+      selectedElementsArray = [];
+      hideLineHandles();
+    }
+    
+    function addToSelection(wordSelection) {
+      selectedWords.push(wordSelection);
+      wordSelection.classed("selected", true);
+    }
+    
+    // ----------------------------
+    // BRUSH-BASED LASSO SELECTION
+    // ----------------------------
+    function startBrushLasso() {
+      // Temporarily disable zoom and change cursor.
+      svg.on(".zoom", null);
+      svg.style("cursor", "crosshair");
+      
+      // Use the actual SVG dimensions for the brush extent.
+      const rect = svg.node().getBoundingClientRect();
+      const brushExtent = [[0, 0], [rect.width, rect.height]];
+      
+      // Create the brush.
+      const brush = d3.brush()
+        .extent(brushExtent)
+        .on("end", brushed);
+      
+      // Append the brush overlay.
+      svg.append("g")
+         .attr("class", "brush")
+         .call(brush);
+    }
+    
+    function brushed(event) {
+      // Remove the brush overlay.
+      svg.select(".brush").remove();
+      // Re-enable zoom and restore cursor.
+      svg.call(zoom);
+      svg.style("cursor", "default");
+      
+      if (!event.selection) return;  // No selection made.
+      
+      clearSelection();
+      const [[x0, y0], [x1, y1]] = event.selection;
+      
+      // Get current zoom transform.
+      const t = d3.zoomTransform(zoomGroup.node());
+      
+      // For each word, compare its screen coordinates with the brushed rectangle.
+      zoomGroup.selectAll("text.word").each(function(d) {
+        const wordSel = d3.select(this);
+        const x_screen = t.applyX(d.x);
+        const y_screen = t.applyY(d.y);
+        if (x_screen >= x0 && x_screen <= x1 &&
+            y_screen >= y0 && y_screen <= y1) {
+          addToSelection(wordSel);
+        }
+      });
+      // Select lines (using mid-point)
+      linesGroup.selectAll("g.line-group").each(function() {
+         const lg = d3.select(this);
+         const lineDatum = lg.select("line.visible").datum();
+         const midX = (lineDatum.x1 + lineDatum.x2) / 2;
+         const midY = (lineDatum.y1 + lineDatum.y2) / 2;
+         const midX_screen = t.applyX(midX);
+         const midY_screen = t.applyY(midY);
+         if (midX_screen >= x0 && midX_screen <= x1 && midY_screen >= y0 && midY_screen <= y1) {
+            selectElement(lg.select("line.visible"));
+         }
+      });
+    }
+
+    // ----------------------------
+    // LINE DRAWING & EDITING
+    // ----------------------------
+    let lineDrawingMode = false;
+    let currentLine = null;
+    let lineStart = null;
+    function toggleLineDrawing() {
+      lineDrawingMode = !lineDrawingMode;
+      document.getElementById("drawLineButton").innerText =
+         lineDrawingMode ? "Finish Drawing" : "Draw Line";
+      if (lineDrawingMode) {
+         svg.on(".zoom", null);
+         svg.style("cursor", "crosshair");
+         svg.on("mousedown.line", startLine)
+            .on("mousemove.line", updateLine)
+            .on("mouseup.line", endLine);
+      } else {
+         svg.on("mousedown.line", null)
+            .on("mousemove.line", null)
+            .on("mouseup.line", null);
+         svg.style("cursor", "default");
+         svg.call(zoom);
+         currentLine = null;
+         lineStart = null;
+      }
+    }
+    function startLine(event) {
+      if (!lineDrawingMode) return;
+      // Use the coordinate system of linesGroup.
+      lineStart = d3.pointer(event, linesGroup.node());
+      currentLine = linesGroup.append("line")
+         .attr("x1", lineStart[0])
+         .attr("y1", lineStart[1])
+         .attr("x2", lineStart[0])
+         .attr("y2", lineStart[1])
+         .attr("stroke", "black")
+         .attr("stroke-width", 2)
+         .on("click", function(event) {
+            event.stopPropagation();
+            selectElement(d3.select(this));
+         });
+    }
+    function updateLine(event) {
+      if (!lineDrawingMode || !currentLine) return;
+      const pointer = d3.pointer(event, linesGroup.node());
+      currentLine.attr("x2", pointer[0]).attr("y2", pointer[1]);
+    }
+
+    function endLine(event) {
+      if (!lineDrawingMode || !currentLine) return;
+      const pointer = d3.pointer(event, linesGroup.node());
+      currentLine.attr("x2", pointer[0]).attr("y2", pointer[1]);
+      if (Math.abs(pointer[0] - lineStart[0]) > 5 || Math.abs(pointer[1] - lineStart[1]) > 5) {
+         const lineData = {
+            type: "line",
+            x1: lineStart[0],
+            y1: lineStart[1],
+            x2: pointer[0],
+            y2: pointer[1],
+            stroke: "black",
+            strokeWidth: 2
+         };
+         linesData.push(lineData);
+         currentLine.remove();
+         // Create a line group with a transparent hit area.
+         const lineGroup = linesGroup.append("g").attr("class", "line-group");
+         lineGroup.append("line")
+            .attr("x1", lineData.x1)
+            .attr("y1", lineData.y1)
+            .attr("x2", lineData.x2)
+            .attr("y2", lineData.y2)
+            .attr("stroke", "transparent")
+            .attr("stroke-width", (lineData.strokeWidth || 2) + 8)
+            .on("click", function(event) {
+               event.stopPropagation();
+               selectElement(d3.select(lineGroup.select("line.visible").node()));
+            });
+         lineGroup.append("line")
+            .attr("class", "visible")
+            .attr("x1", lineData.x1)
+            .attr("y1", lineData.y1)
+            .attr("x2", lineData.x2)
+            .attr("y2", lineData.y2)
+            .attr("stroke", lineData.stroke || "black")
+            .attr("stroke-width", lineData.strokeWidth || 2)
+            .on("click", function(event) {
+               event.stopPropagation();
+               selectElement(d3.select(this));
+            })
+            .datum(lineData);
+         lineData.type = "line";
+      } else {
+         currentLine.remove();
+      }
+      currentLine = null;
+      lineStart = null;
+    }
+    
+    // ----------------------------
+    // LINE EDITING HANDLES
+    // ----------------------------
+    let handle1 = null, handle2 = null;
+    function showLineHandles(lineEl) {
+      hideLineHandles();
+      const d = lineEl.datum();
+      
+      // Create endpoint handles (for independent endpoint editing)
+      handle1 = handlesGroup.append("circle")
+        .attr("cx", d.x1)
+        .attr("cy", d.y1)
+        .attr("r", 6)
+        .attr("class", "handle")
+        .call(d3.drag()
+            .on("drag", function(event) {
+                d.x1 = event.x;
+                d.y1 = event.y;
+                d3.select(this).attr("cx", d.x1).attr("cy", d.y1);
+                // Update the visible line’s endpoint...
+                lineEl.attr("x1", d.x1).attr("y1", d.y1);
+                // ...and its transparent hit area (assumed to be the first child)
+                d3.select(lineEl.node().parentNode)
+                  .select("line:nth-child(1)")
+                  .attr("x1", d.x1).attr("y1", d.y1);
+            }));
+      
+      handle2 = handlesGroup.append("circle")
+        .attr("cx", d.x2)
+        .attr("cy", d.y2)
+        .attr("r", 6)
+        .attr("class", "handle")
+        .call(d3.drag()
+            .on("drag", function(event) {
+                d.x2 = event.x;
+                d.y2 = event.y;
+                d3.select(this).attr("cx", d.x2).attr("cy", d.y2);
+                lineEl.attr("x2", d.x2).attr("y2", d.y2);
+                d3.select(lineEl.node().parentNode)
+                  .select("line:nth-child(1)")
+                  .attr("x2", d.x2).attr("y2", d.y2);
+            }));
+      
+      // *** NEW: Add a drag behavior to the entire line to move both endpoints ***
+      lineEl.call(d3.drag()
+        .on("start", function(event, d) {
+            // Record the starting pointer position and initial endpoint coordinates.
+            d.dragStart = [event.x, event.y];
+            d.initial = { x1: d.x1, y1: d.y1, x2: d.x2, y2: d.y2 };
+            // Prevent propagation so that dragging the line doesn’t trigger other behaviors.
+            event.sourceEvent.stopPropagation();
+        })
+        .on("drag", function(event, d) {
+            // Calculate how far the pointer has moved.
+            const dx = event.x - d.dragStart[0];
+            const dy = event.y - d.dragStart[1];
+            // Update both endpoints by the same offset.
+            d.x1 = d.initial.x1 + dx;
+            d.y1 = d.initial.y1 + dy;
+            d.x2 = d.initial.x2 + dx;
+            d.y2 = d.initial.y2 + dy;
+            // Update the visible line
+            d3.select(this)
+              .attr("x1", d.x1)
+              .attr("y1", d.y1)
+              .attr("x2", d.x2)
+              .attr("y2", d.y2);
+            // Update the transparent hit area (first child of the group)
+            d3.select(this.parentNode)
+              .select("line:nth-child(1)")
+              .attr("x1", d.x1)
+              .attr("y1", d.y1)
+              .attr("x2", d.x2)
+              .attr("y2", d.y2);
+            // Also update the handles so they stay in sync
+            if (handle1) {
+              handle1.attr("cx", d.x1).attr("cy", d.y1);
+            }
+            if (handle2) {
+              handle2.attr("cx", d.x2).attr("cy", d.y2);
+            }
+        })
+        .on("end", function(event, d) {
+            // (Optional) Push the new state to your undo stack, etc.
+        }));
+    }
+    
+    function hideLineHandles() {
+      handlesGroup.selectAll("*").remove();
+    }
+
+    // ----------------------------
+    // COPY/PASTE FUNCTIONALITY
+    // ----------------------------
+
+    document.addEventListener("keydown", function (e) {
+        // Check that the event isn't coming from an input or textarea so that you don't override normal typing.
+        if (["INPUT", "TEXTAREA"].includes(e.target.tagName)) {
+            return;
+        }
+        
+        // For Ctrl+C: Copy the selected word.
+        if (e.ctrlKey && e.key.toLowerCase() === "c") {
+            if (selectedWords && selectedWords.length > 0) {
+                // Assume the first (or only) selected word is the one to copy.
+                // Use a deep copy so further modifications don’t affect the original.
+                clipboardWord = JSON.parse(JSON.stringify(selectedWords[0].datum()));
+                console.log("Copied word:", clipboardWord);
+            }
+        }
+        
+        // For Ctrl+V: Paste the word.
+        if (e.ctrlKey && e.key.toLowerCase() === "v") {
+            if (clipboardWord) {
+                // Optionally offset the position so the new instance isn’t exactly on top of the original.
+                let pastedWord = JSON.parse(JSON.stringify(clipboardWord));
+                pastedWord.x += 10;  // Adjust as needed
+                pastedWord.y += 10;  // Adjust as needed
+                
+                // Call a helper function to create the new word instance.
+                pasteWord(pastedWord);
+                console.log("Pasted word:", pastedWord);
+            }
+        }
+    });
+
+    function pasteWord(wordData) {
+        // Record state before change (if you use undo functionality).
+        pushToUndo(getState(), true);
+        
+        // Create a new text element with the given wordData.
+        // (We assume you have a D3 selection for zoomGroup as in your code.)
+        const textElement = zoomGroup.append("text")
+            .attr("x", wordData.x)
+            .attr("y", wordData.y)
+            .attr("font-size", fontSizeMap[wordData.size])
+            .attr("fill", wordData.color)
+            .attr("data-size", wordData.size)
+            .attr("class", "word")
+            .text(wordData.word)
+            .on("click", function(event) {
+                event.stopPropagation();
+                selectWord(d3.select(this));
+            })
+            .call(d3.drag()
+                .on("start", dragStart)
+                .on("drag", dragging)
+                .on("end", dragEnd));
+        
+        // Attach the data object to the element.
+        textElement.datum(wordData);
+        
+        // Optionally, add it to your words array if you’re keeping track.
+        words.push(wordData);
+    }
+
+    // ----------------------------
+    // JSON GENERATION & DISPLAY
+    // ----------------------------
+
+    function generateJSON() {
+      // Compute the center point coordinates.
+      const centerX = parseFloat(centerPoint.attr("cx"));
+      const centerY = parseFloat(centerPoint.attr("cy"));
+
+      // Compute the distance of each word to the center.
+      words.forEach(word => {
+        word.distanceToCenter = Math.sqrt(
+          Math.pow(word.x - centerX, 2) + Math.pow(word.y - centerY, 2)
+        );
+      });
+
+      // Choose a decay constant. Adjust alpha based on your dataset’s scale.
+      const alpha = 0.1;
+
+      // Compute the similarity (normalized to 0-1) between each pair of words.
+      words.forEach(word => {
+        word.links = {};  // Initialize the links object.
+        words.forEach(otherWord => {
+          if (word.word !== otherWord.word) {
+            const distance = Math.sqrt(
+              Math.pow(word.x - otherWord.x, 2) + Math.pow(word.y - otherWord.y, 2)
+            );
+            // Exponential decay normalization:
+            // - When distance is 0, similarity = Math.exp(0) = 1.
+            // - As distance increases, similarity falls toward 0.
+            word.links[otherWord.word] = Math.exp(-alpha * distance);
+          }
+        });
+      });
+
+      // Prepare the JSON output.
+      const jsonOutput = {
+        words: words,               // Each word now includes metadata.
+        centerPoint: { x: centerX, y: centerY },
+        lines: linesData
+      };
+
+      // Copy the JSON string to the clipboard.
+      navigator.clipboard.writeText(JSON.stringify(jsonOutput, null, 2))
+        .then(() => alert("JSON copied to clipboard!"))
+        .catch(err => alert("Failed to copy JSON: " + err));
+    }
+    
+    function displayJSON() {
+      navigator.clipboard.readText()
+        .then(text => {
+          let jsonData;
+          try {
+            jsonData = JSON.parse(text);
+          } catch (err) {
+            alert("Error parsing JSON: " + err);
+            return;
+          }
+    
+          // Clear the zoomGroup while preserving zoom behavior.
+          zoomGroup.selectAll("*").remove();
+          linesGroup.selectAll("*").remove();
+          handlesGroup.selectAll("*").remove();
+          words = [];
+          linesData = [];
+          clearSelection();
+    
+          // Recreate the center point.
+          const cp = jsonData.centerPoint;
+          centerPoint = zoomGroup.append("circle")
+            .attr("cx", cp.x)
+            .attr("cy", cp.y)
+            .attr("r", 10)
+            .attr("class", "center-point")
+            .call(d3.drag()
+              .on("start", dragStart)
+              .on("drag", draggingCenter)
+              .on("end", dragEnd));
+    
+          // Create a group for words.
+          const wordsGroup = zoomGroup.append("g").attr("id", "words");
+    
+          jsonData.words.forEach(wordData => {
+            const textElement = wordsGroup.append("text")
+              .attr("x", wordData.x)
+              .attr("y", wordData.y)
+              .attr("font-size", fontSizeMap[wordData.size])
+              .attr("fill", wordData.color || "#000")
+              .attr("data-size", wordData.size)
+              .attr("class", "word")
+              .text(wordData.word)
+              .on("click", function(event) {
+                event.stopPropagation();
+                selectWord(d3.select(this));
+              })
+              .call(d3.drag()
+                .on("start", dragStart)
+                .on("drag", dragging)
+                .on("end", dragEnd));
+            textElement.datum(wordData);
+            words.push(wordData);
+          });
+    
+          // Re-create lines.
+          if (jsonData.lines) {
+            linesData = jsonData.lines;
+            jsonData.lines.forEach(lineData => {
+              const lineGroup = linesGroup.append("g").attr("class", "line-group");
+              
+              // Transparent hit area.
+              lineGroup.append("line")
+                .attr("x1", lineData.x1)
+                .attr("y1", lineData.y1)
+                .attr("x2", lineData.x2)
+                .attr("y2", lineData.y2)
+                .attr("stroke", "transparent")
+                .attr("stroke-width", (lineData.strokeWidth || 2) + 8)
+                .on("click", function(event) {
+                  event.stopPropagation();
+                  selectElement(d3.select(lineGroup.select("line.visible").node()));
+                });
+              
+              // Visible line.
+              lineGroup.append("line")
+                .attr("class", "visible")
+                .attr("x1", lineData.x1)
+                .attr("y1", lineData.y1)
+                .attr("x2", lineData.x2)
+                .attr("y2", lineData.y2)
+                .attr("stroke", lineData.stroke || "black")
+                .attr("stroke-width", lineData.strokeWidth || 2)
+                .on("click", function(event) {
+                  event.stopPropagation();
+                  selectElement(d3.select(this));
+                })
+                .datum(lineData);
+            });
+          }
+    
+          // Clear Undo/Redo memory.
+          undoStack = [];
+          redoStack = [];
+          updateUndoRedoButtons();
+        })
+        .catch(err => {
+          alert("Failed to read JSON from clipboard: " + err);
+        });
+    }
+    
+  </script>
+</body>
+</html>
